@@ -298,7 +298,7 @@ export default function CustomerMilkCalendarScreen() {
 
       const f = parseFloat(fStr) || 0;
       const s = parseFloat(sStr) || 0;
-      if (!isBuyer && f > 0 && s > 0) {
+      if (!isBuyer && pricingSettings?.autoCalculate === true && f > 0 && s > 0) {
         const autoRate = calculateFatSnfRate(f, s, pricingSettings?.customerRate);
         setModalRateStr(autoRate > 0 ? String(autoRate) : (existing.rate ? existing.rate.toString() : ''));
       } else {
@@ -339,7 +339,7 @@ export default function CustomerMilkCalendarScreen() {
 
       const f = parseFloat(fStr) || 0;
       const s = parseFloat(sStr) || 0;
-      if (!isBuyer && f > 0 && s > 0) {
+      if (!isBuyer && pricingSettings?.autoCalculate === true && f > 0 && s > 0) {
         const autoRate = calculateFatSnfRate(f, s, pricingSettings?.customerRate);
         setModalRateStr(autoRate > 0 ? String(autoRate) : (existing.rate ? existing.rate.toString() : ''));
       } else {
@@ -369,14 +369,14 @@ export default function CustomerMilkCalendarScreen() {
     setModalFatStr(cleanFat);
     setModalSnfStr(cleanSnf);
 
-    if (!isBuyer) {
+    if (!isBuyer && pricingSettings?.autoCalculate === true) {
       const f = parseFloat(cleanFat);
       const s = parseFloat(cleanSnf);
       if (!isNaN(f) && f > 0 && !isNaN(s) && s > 0) {
         const autoRate = calculateFatSnfRate(f, s, pricingSettings?.customerRate);
-        setModalRateStr(autoRate > 0 ? String(autoRate) : '');
-      } else {
-        setModalRateStr('');
+        if (autoRate > 0) {
+          setModalRateStr(String(autoRate));
+        }
       }
     }
   };
@@ -409,12 +409,19 @@ export default function CustomerMilkCalendarScreen() {
     let rateNum = 0;
     if (isBuyer) {
       rateNum = parseFloat(modalRateStr) || customer.default_sale_rate || 60;
-    } else {
+    } else if (pricingSettings?.autoCalculate === true) {
       if (fatNum <= 0 || snfNum <= 0) {
         showAlert('Invalid Quality', 'Please enter valid Fat % and SNF % to calculate rate.');
         return;
       }
       rateNum = calculateFatSnfRate(fatNum, snfNum, pricingSettings?.customerRate);
+    } else {
+      // Manual Rate Entry Mode (Default when autoCalculate is disabled)
+      rateNum = parseFloat(modalRateStr);
+      if (!rateNum || rateNum <= 0) {
+        showAlert('Missing Rate', 'Please enter milk rate (₹/L) for this supplier.');
+        return;
+      }
     }
 
     const calculatedAmount = Math.round(qtyNum * rateNum * 100) / 100;
@@ -459,9 +466,9 @@ export default function CustomerMilkCalendarScreen() {
         try {
           await deleteMilkCollection(modalExistingCollId);
           setShowMilkModal(false);
-          showToast(`Record deleted for ${customer.name}`);
+          showToast(`🗑️ Record deleted`);
         } catch (err: any) {
-          showAlert('Error', err?.message || 'Failed to delete record.', 'danger');
+          showAlert('Error', err?.message || 'Failed to delete entry.', 'danger');
         }
       },
     });
@@ -477,7 +484,9 @@ export default function CustomerMilkCalendarScreen() {
     modalFatNum > 0 && modalSnfNum > 0
       ? calculateFatSnfRate(modalFatNum, modalSnfNum, pricingSettings?.customerRate)
       : parseFloat(modalRateStr) || 0;
-  const activeRate = isBuyer ? (parseFloat(modalRateStr) || customer.default_sale_rate || 60) : computedSellerRate;
+  const activeRate = isBuyer
+    ? (parseFloat(modalRateStr) || customer.default_sale_rate || 60)
+    : (pricingSettings?.autoCalculate === true ? computedSellerRate : (parseFloat(modalRateStr) || 0));
   const calcModalTotal = Math.round(calcModalQty * activeRate * 100) / 100;
 
   const handleShareMonthlyWhatsApp = async () => {
@@ -1154,7 +1163,13 @@ export default function CustomerMilkCalendarScreen() {
                         blurOnSubmit={isBuyer}
                         onSubmitEditing={() => {
                           if (isBuyer) {
-                            handleSaveModalEntry();
+                            if (rateInputRef.current) {
+                              rateInputRef.current.focus();
+                            } else {
+                              handleSaveModalEntry();
+                            }
+                          } else if (pricingSettings?.autoCalculate !== true && rateInputRef.current) {
+                            rateInputRef.current.focus();
                           } else {
                             fatInputRef.current?.focus();
                           }
@@ -1168,12 +1183,64 @@ export default function CustomerMilkCalendarScreen() {
                   </View>
                 </View>
 
-                {/* Quality Inputs: Fat (%) | SNF (%) - Only for Milk Sellers */}
+                {/* Rate Input for Retail Buyers */}
+                {isBuyer && (
+                  <View style={[styles.gridLineRow, { marginTop: 12 }]}>
+                    <View style={[styles.gridColField, { flex: 1 }]}>
+                      <Text style={[styles.gridFieldLabel, { color: colors.textMedium }]}>Rate (₹ / Litre) *</Text>
+                      <View style={[styles.inputBoxHighlight, { backgroundColor: isDark ? colors.inputBg : '#ECFDF5', borderColor: '#10B981' }]}>
+                        <IndianRupee size={16} color="#059669" style={{ marginRight: 6 }} />
+                        <TextInput
+                          ref={rateInputRef}
+                          style={[styles.gridInputTextBold, { color: colors.text }]}
+                          keyboardType="decimal-pad"
+                          returnKeyType="done"
+                          enterKeyHint="done"
+                          onSubmitEditing={handleSaveModalEntry}
+                          value={modalRateStr}
+                          onChangeText={(val) => setModalRateStr(sanitizeDecimalInput(val))}
+                          placeholder={String(customer.default_sale_rate || 60)}
+                          placeholderTextColor={colors.textMuted}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Seller Inputs (Rate, Fat, SNF) */}
                 {!isBuyer && (
                   <>
+                    {/* Manual Rate Input Field (When Auto Rate is Disabled - Default) */}
+                    {pricingSettings?.autoCalculate !== true && (
+                      <View style={[styles.gridLineRow, { marginTop: 12 }]}>
+                        <View style={[styles.gridColField, { flex: 1 }]}>
+                          <Text style={[styles.gridFieldLabel, { color: colors.textMedium }]}>Rate (₹ / Litre) *</Text>
+                          <View style={[styles.inputBoxHighlight, { backgroundColor: isDark ? colors.inputBg : '#ECFDF5', borderColor: '#10B981' }]}>
+                            <IndianRupee size={16} color="#059669" style={{ marginRight: 6 }} />
+                            <TextInput
+                              ref={rateInputRef}
+                              style={[styles.gridInputTextBold, { color: colors.text }]}
+                              keyboardType="decimal-pad"
+                              returnKeyType="next"
+                              enterKeyHint="next"
+                              blurOnSubmit={false}
+                              onSubmitEditing={() => fatInputRef.current?.focus()}
+                              value={modalRateStr}
+                              onChangeText={(val) => setModalRateStr(sanitizeDecimalInput(val))}
+                              placeholder="0.00"
+                              placeholderTextColor={colors.textMuted}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Quality Inputs: Fat (%) | SNF (%) */}
                     <View style={[styles.gridLineRow, { marginTop: 12 }]}>
                       <View style={[styles.gridColField, { flex: 1 }]}>
-                        <Text style={[styles.gridFieldLabel, { color: colors.textMedium }]}>Fat (%) *</Text>
+                        <Text style={[styles.gridFieldLabel, { color: colors.textMedium }]}>
+                          Fat (%) {pricingSettings?.autoCalculate === true ? '*' : ''}
+                        </Text>
                         <View style={[styles.inputBoxNormal, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
                           <FlaskConical size={16} color="#D97706" style={{ marginRight: 6 }} />
                           <TextInput
@@ -1186,12 +1253,16 @@ export default function CustomerMilkCalendarScreen() {
                             onSubmitEditing={() => snfInputRef.current?.focus()}
                             value={modalFatStr}
                             onChangeText={(val) => handleModalFatSnfChange(val, modalSnfStr)}
+                            placeholder="0.0"
+                            placeholderTextColor={colors.textMuted}
                           />
                         </View>
                       </View>
 
                       <View style={[styles.gridColField, { flex: 1 }]}>
-                        <Text style={[styles.gridFieldLabel, { color: colors.textMedium }]}>SNF (%) *</Text>
+                        <Text style={[styles.gridFieldLabel, { color: colors.textMedium }]}>
+                          SNF (%) {pricingSettings?.autoCalculate === true ? '*' : ''}
+                        </Text>
                         <View style={[styles.inputBoxNormal, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
                           <FlaskConical size={16} color="#059669" style={{ marginRight: 6 }} />
                           <TextInput
@@ -1203,32 +1274,36 @@ export default function CustomerMilkCalendarScreen() {
                             onSubmitEditing={handleSaveModalEntry}
                             value={modalSnfStr}
                             onChangeText={(val) => handleModalFatSnfChange(modalFatStr, val)}
+                            placeholder="0.0"
+                            placeholderTextColor={colors.textMuted}
                           />
                         </View>
                       </View>
                     </View>
 
-                    {/* Auto-Calculated Customer Rate Display Card (Read-only) */}
-                    <View style={[styles.autoRateCard, isDark && { backgroundColor: 'rgba(22, 163, 74, 0.12)', borderColor: 'rgba(34, 197, 94, 0.3)' }]}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Lock size={13} color={isDark ? '#4ADE80' : '#166534'} />
-                          <Text style={[styles.autoRateTitle, isDark && { color: '#4ADE80' }]}>Calculated Rate</Text>
+                    {/* Auto-Calculated Customer Rate Display Card (When Auto Rate is Enabled) */}
+                    {pricingSettings?.autoCalculate === true && (
+                      <View style={[styles.autoRateCard, isDark && { backgroundColor: 'rgba(22, 163, 74, 0.12)', borderColor: 'rgba(34, 197, 94, 0.3)' }]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Lock size={13} color={isDark ? '#4ADE80' : '#166534'} />
+                            <Text style={[styles.autoRateTitle, isDark && { color: '#4ADE80' }]}>Calculated Rate</Text>
+                          </View>
+                          <View style={[styles.autoRateBadge, isDark && { backgroundColor: 'rgba(22, 163, 74, 0.25)', borderColor: 'rgba(34, 197, 94, 0.5)' }]}>
+                            <Text style={[styles.autoRateBadgeText, isDark && { color: '#4ADE80' }]}>Auto Locked</Text>
+                          </View>
                         </View>
-                        <View style={[styles.autoRateBadge, isDark && { backgroundColor: 'rgba(22, 163, 74, 0.25)', borderColor: 'rgba(34, 197, 94, 0.5)' }]}>
-                          <Text style={[styles.autoRateBadgeText, isDark && { color: '#4ADE80' }]}>Auto Locked</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
+                          <Text style={[styles.autoRateValue, isDark && { color: '#4ADE80' }]}>
+                            {computedSellerRate > 0 ? `₹${computedSellerRate.toFixed(2)}` : '—'}
+                            <Text style={[styles.autoRateUnit, isDark && { color: '#86EFAC' }]}> / Litre</Text>
+                          </Text>
+                          <Text style={[styles.autoRateSub, isDark && { color: '#86EFAC' }]}>
+                            Base: ₹{pricingSettings?.customerRate.baseRate || 52}/L
+                          </Text>
                         </View>
                       </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
-                        <Text style={[styles.autoRateValue, isDark && { color: '#4ADE80' }]}>
-                          {computedSellerRate > 0 ? `₹${computedSellerRate.toFixed(2)}` : '—'}
-                          <Text style={[styles.autoRateUnit, isDark && { color: '#86EFAC' }]}> / Litre</Text>
-                        </Text>
-                        <Text style={[styles.autoRateSub, isDark && { color: '#86EFAC' }]}>
-                          Base: ₹{pricingSettings?.customerRate.baseRate || 52}/L
-                        </Text>
-                      </View>
-                    </View>
+                    )}
                   </>
                 )}
 

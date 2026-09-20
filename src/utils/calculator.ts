@@ -39,7 +39,7 @@ export function formatCurrency(amount?: number | null): string {
  * Strips all characters except digits (0-9) and at most one decimal point.
  */
 export function sanitizeDecimalInput(text: string): string {
-  let cleaned = text.replace(/[^0-9.]/g, '');
+  let cleaned = text.replace(/,/g, '.').replace(/[^0-9.]/g, '');
   const parts = cleaned.split('.');
   if (parts.length > 2) {
     cleaned = parts[0] + '.' + parts.slice(1).join('');

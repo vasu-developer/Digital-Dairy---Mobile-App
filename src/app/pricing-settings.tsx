@@ -22,6 +22,8 @@ import {
   Lock,
   Fingerprint,
   ShieldCheck,
+  Sparkles,
+  Edit3,
 } from 'lucide-react-native';
 import { ThemeColors } from '@/constants/theme';
 import { useAppTheme } from '@/context/ThemeContext';
@@ -31,6 +33,7 @@ import {
   DairyPricingSettings,
   DEFAULT_CUSTOMER_RATE_CONFIG,
   DEFAULT_DISPATCH_RATE_CONFIG,
+  DEFAULT_PRICING_SETTINGS,
 } from '@/utils/rate-chart';
 import { authenticateDeviceScreenLock } from '@/utils/security';
 import RateConfigForm from '@/components/pricing/RateConfigForm';
@@ -45,6 +48,9 @@ export default function PricingSettingsScreen() {
   const { pricingSettings, updatePricingSettings } = useRepository();
 
   const [activeTab, setActiveTab] = useState<'CUSTOMER' | 'DISPATCH'>('CUSTOMER');
+  const [autoCalculate, setAutoCalculate] = useState<boolean>(
+    pricingSettings?.autoCalculate === true
+  );
   const [customerRate, setCustomerRate] = useState<RateChartConfig>(
     pricingSettings?.customerRate || DEFAULT_CUSTOMER_RATE_CONFIG
   );
@@ -55,7 +61,7 @@ export default function PricingSettingsScreen() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
-  const [pendingAction, setPendingAction] = useState<'EDIT' | 'SAVE' | 'RESET' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'EDIT' | 'SAVE' | 'RESET' | 'TOGGLE_AUTO' | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{
     visible: boolean;
@@ -78,8 +84,67 @@ export default function PricingSettingsScreen() {
     if (pricingSettings) {
       setCustomerRate(pricingSettings.customerRate || DEFAULT_CUSTOMER_RATE_CONFIG);
       setDispatchRate(pricingSettings.dispatchRate || DEFAULT_DISPATCH_RATE_CONFIG);
+      setAutoCalculate(pricingSettings.autoCalculate === true);
     }
   }, [pricingSettings]);
+
+  const executeToggleAutoRate = async () => {
+    const nextVal = !autoCalculate;
+    setAutoCalculate(nextVal);
+    try {
+      await updatePricingSettings({
+        ...(pricingSettings || DEFAULT_PRICING_SETTINGS),
+        customerRate,
+        dispatchRate,
+        autoCalculate: nextVal,
+      });
+      setConfirmModal({
+        visible: true,
+        title: nextVal ? 'Auto Rate Enabled' : 'Manual Rate Entry Enabled',
+        message: nextVal
+          ? '✓ Milk rates will now calculate automatically from Fat & SNF formula during collection and dispatch.'
+          : '✓ Auto rate formula is disabled. You can now enter milk rates manually during daily collection and dispatch.',
+        type: nextVal ? 'success' : 'info',
+        confirmText: 'OK',
+        singleButton: true,
+        onConfirm: () => setConfirmModal((prev) => ({ ...prev, visible: false })),
+      });
+    } catch (e: any) {
+      setAutoCalculate(!nextVal); // Revert on failure
+      setConfirmModal({
+        visible: true,
+        title: 'Error',
+        message: 'Could not update auto rate setting.',
+        type: 'danger',
+        confirmText: 'OK',
+        singleButton: true,
+        onConfirm: () => setConfirmModal((prev) => ({ ...prev, visible: false })),
+      });
+    }
+  };
+
+  const handleToggleAutoRatePress = async () => {
+    const promptTitle = autoCalculate
+      ? 'Unlock to disable auto rate formula'
+      : 'Unlock to enable auto rate calculation formula';
+    const auth = await authenticateDeviceScreenLock(promptTitle);
+    if (auth.success) {
+      await executeToggleAutoRate();
+    } else if (auth.error === 'NO_SCREEN_LOCK') {
+      setPendingAction('TOGGLE_AUTO');
+      setShowPinModal(true);
+    } else if (!auth.cancelled) {
+      setConfirmModal({
+        visible: true,
+        title: 'Authorization Failed',
+        message: 'Could not verify device owner. Auto rate setting was not changed.',
+        type: 'danger',
+        confirmText: 'OK',
+        singleButton: true,
+        onConfirm: () => setConfirmModal((prev) => ({ ...prev, visible: false })),
+      });
+    }
+  };
 
   const handleCustomerRateChange = (newCfg: RateChartConfig) => {
     setCustomerRate(newCfg);
@@ -115,6 +180,7 @@ export default function PricingSettingsScreen() {
     if (pricingSettings) {
       setCustomerRate(pricingSettings.customerRate || DEFAULT_CUSTOMER_RATE_CONFIG);
       setDispatchRate(pricingSettings.dispatchRate || DEFAULT_DISPATCH_RATE_CONFIG);
+      setAutoCalculate(pricingSettings.autoCalculate === true);
     }
     setHasUnsavedChanges(false);
     setIsEditing(false);
@@ -123,6 +189,7 @@ export default function PricingSettingsScreen() {
   const executeSave = async () => {
     try {
       const payload: DairyPricingSettings = {
+        autoCalculate,
         customerRate,
         dispatchRate,
       };
@@ -154,7 +221,9 @@ export default function PricingSettingsScreen() {
   const executeReset = async () => {
     setCustomerRate(DEFAULT_CUSTOMER_RATE_CONFIG);
     setDispatchRate(DEFAULT_DISPATCH_RATE_CONFIG);
+    setAutoCalculate(false);
     await updatePricingSettings({
+      autoCalculate: false,
       customerRate: DEFAULT_CUSTOMER_RATE_CONFIG,
       dispatchRate: DEFAULT_DISPATCH_RATE_CONFIG,
     });
@@ -163,7 +232,7 @@ export default function PricingSettingsScreen() {
     setConfirmModal({
       visible: true,
       title: 'Rates Reset',
-      message: 'Rates have been reset to standard baseline defaults.',
+      message: 'Rates have been reset to standard baseline defaults (Manual rate entry default).',
       type: 'success',
       confirmText: 'OK',
       singleButton: true,
@@ -230,6 +299,8 @@ export default function PricingSettingsScreen() {
       await executeSave();
     } else if (pendingAction === 'RESET') {
       await executeReset();
+    } else if (pendingAction === 'TOGGLE_AUTO') {
+      await executeToggleAutoRate();
     }
     setPendingAction(null);
   };
@@ -314,15 +385,52 @@ export default function PricingSettingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Quality Pricing Banner */}
-          <View style={[styles.infoBanner, isDark && { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}>
-            <Info size={18} color="#2563EB" style={{ marginTop: 2, marginRight: 8 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.infoTitle, isDark && { color: colors.text }]}>Automatic Quality Pricing</Text>
-              <Text style={[styles.infoText, isDark && { color: colors.textMedium }]}>
-                Milk rates calculate automatically using tested Fat and SNF percentages during collection and plant dispatch.
-              </Text>
+          {/* Auto Rate Calculation Mode Toggle Card */}
+          <View style={[styles.modeToggleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                <View style={[styles.modeIconCircle, { backgroundColor: autoCalculate ? (isDark ? 'rgba(5, 150, 105, 0.2)' : '#ECFDF5') : (isDark ? 'rgba(217, 119, 6, 0.2)' : '#FEF3C7') }]}>
+                  {autoCalculate ? (
+                    <Sparkles size={20} color="#059669" />
+                  ) : (
+                    <Edit3 size={20} color="#D97706" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modeTitle, { color: colors.text }]}>Auto Rate Formula</Text>
+                  <Text style={[styles.modeStatusText, { color: autoCalculate ? '#059669' : (isDark ? '#FBBF24' : '#D97706') }]}>
+                    {autoCalculate ? '✓ Auto Enabled (Formula)' : '✕ Disabled (Manual Rates)'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Authenticated 1-Tap Toggle Button */}
+              <TouchableOpacity
+                style={[
+                  styles.toggleActionBtn,
+                  autoCalculate ? styles.toggleActionBtnActive : styles.toggleActionBtnInactive,
+                  !autoCalculate && isDark && { backgroundColor: colors.cardSecondary, borderColor: colors.border },
+                ]}
+                onPress={handleToggleAutoRatePress}
+                activeOpacity={0.8}
+              >
+                <Lock size={12} color={autoCalculate ? '#B91C1C' : '#047857'} style={{ marginRight: 4 }} />
+                <Text
+                  style={[
+                    styles.toggleActionBtnText,
+                    autoCalculate ? styles.toggleActionBtnTextActive : { color: colors.text },
+                  ]}
+                >
+                  {autoCalculate ? 'Disable Auto Rate' : 'Enable Auto Rate'}
+                </Text>
+              </TouchableOpacity>
             </View>
+
+            <Text style={[styles.modeExplanationText, { color: colors.textMuted }]}>
+              {autoCalculate
+                ? 'Rates calculate automatically using tested Fat & SNF percentages during milk entry.'
+                : 'Rates are entered manually by the operator during milk entry. Fat & SNF inputs remain available.'}
+            </Text>
           </View>
 
           {/* Form & Simulator based on active tab */}
@@ -520,6 +628,67 @@ const styles = StyleSheet.create({
   tabButtonTextActive: {
     color: '#FFFFFF',
     fontWeight: '800',
+  },
+  modeToggleCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  modeIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: ThemeColors.textDark,
+  },
+  modeStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  toggleActionBtn: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggleActionBtnActive: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  toggleActionBtnInactive: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  toggleActionBtnText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+  },
+  toggleActionBtnTextActive: {
+    color: '#DC2626',
+  },
+  modeExplanationText: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
   infoBanner: {
     flexDirection: 'row',

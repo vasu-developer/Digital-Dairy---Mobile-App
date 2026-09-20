@@ -82,11 +82,12 @@ export default function DispatchCalendarScreen() {
   const [selectedDay, setSelectedDay] = useState<number>(TODAY_DAY);
   const [activeTab, setActiveTab] = useState<'CALENDAR' | 'STATEMENT'>('CALENDAR');
 
-  // Quality & Pricing Modal State (Fat & SNF edit, Rate auto-calculated)
+  // Quality & Pricing Modal State (Fat & SNF edit, Rate auto-calculated or manual)
   const [showRateModal, setShowRateModal] = useState<boolean>(false);
   const [selectedDispatch, setSelectedDispatch] = useState<MilkDispatch | null>(null);
   const [modalFatStr, setModalFatStr] = useState<string>('');
   const [modalSnfStr, setModalSnfStr] = useState<string>('');
+  const [modalRateStr, setModalRateStr] = useState<string>('');
   const modalFatInputRef = useRef<TextInput>(null);
   const modalSnfInputRef = useRef<TextInput>(null);
 
@@ -270,9 +271,11 @@ export default function DispatchCalendarScreen() {
   const modalFatNum = parseFloat(modalFatStr) || 0;
   const modalSnfNum = parseFloat(modalSnfStr) || 0;
   const modalAutoRate =
-    modalFatNum > 0 && modalSnfNum > 0
-      ? calculateFatSnfRate(modalFatNum, modalSnfNum, pricingSettings?.dispatchRate)
-      : 0;
+    pricingSettings?.autoCalculate === true
+      ? (modalFatNum > 0 && modalSnfNum > 0
+          ? calculateFatSnfRate(modalFatNum, modalSnfNum, pricingSettings?.dispatchRate)
+          : 0)
+      : (parseFloat(modalRateStr) || (modalFatNum > 0 && modalSnfNum > 0 ? calculateFatSnfRate(modalFatNum, modalSnfNum, pricingSettings?.dispatchRate) : 0));
   const modalTotalAmount = selectedDispatch
     ? Math.round(selectedDispatch.dispatched_litres * modalAutoRate * 100) / 100
     : 0;
@@ -282,6 +285,7 @@ export default function DispatchCalendarScreen() {
     setSelectedDispatch(dispatch);
     setModalFatStr(dispatch.fat > 0 ? String(dispatch.fat) : '');
     setModalSnfStr(dispatch.snf > 0 ? String(dispatch.snf) : '');
+    setModalRateStr((dispatch.rate ?? 0) > 0 ? String(dispatch.rate) : '');
     setShowRateModal(true);
     setTimeout(() => {
       modalFatInputRef.current?.focus();
@@ -291,15 +295,24 @@ export default function DispatchCalendarScreen() {
   const handleSaveRate = async () => {
     if (!selectedDispatch) return;
 
-    const fatNum = parseFloat(modalFatStr);
-    const snfNum = parseFloat(modalSnfStr);
-    if (isNaN(fatNum) || fatNum <= 0 || isNaN(snfNum) || snfNum <= 0) {
-      showAlert('Invalid Quality', 'Please enter valid Fat % and SNF % values.');
-      return;
+    const fatNum = parseFloat(modalFatStr) || 0;
+    const snfNum = parseFloat(modalSnfStr) || 0;
+    const isAutoCalculate = pricingSettings?.autoCalculate === true;
+    let calculatedRate = 0;
+
+    if (isAutoCalculate) {
+      if (isNaN(fatNum) || fatNum <= 0 || isNaN(snfNum) || snfNum <= 0) {
+        showAlert('Invalid Quality', 'Please enter valid Fat % and SNF % values.');
+        return;
+      }
+      calculatedRate = calculateFatSnfRate(fatNum, snfNum, pricingSettings?.dispatchRate);
+    } else {
+      calculatedRate = parseFloat(modalRateStr) || 0;
     }
 
-    const calculatedRate = calculateFatSnfRate(fatNum, snfNum, pricingSettings?.dispatchRate);
-    const calculatedAmount = Math.round(selectedDispatch.dispatched_litres * calculatedRate * 100) / 100;
+    const calculatedAmount = calculatedRate > 0
+      ? Math.round(selectedDispatch.dispatched_litres * calculatedRate * 100) / 100
+      : 0;
 
     try {
       await updateMilkDispatch({
@@ -311,7 +324,13 @@ export default function DispatchCalendarScreen() {
       });
 
       setShowRateModal(false);
-      showAlert('Quality & Rate Saved', `Plant rate set to ₹${calculatedRate.toFixed(2)}/L via Fat & SNF formula.`, 'success');
+      showAlert(
+        'Rate Saved',
+        calculatedRate > 0
+          ? `Plant rate set to ₹${calculatedRate.toFixed(2)}/L.`
+          : 'Quality updated (Plant rate left pending).',
+        'success'
+      );
     } catch (err: any) {
       showAlert('Error', err?.message || 'Failed to update rate.', 'danger');
     }
@@ -323,13 +342,15 @@ export default function DispatchCalendarScreen() {
     setAddDispatchFat(cleanFat);
     setAddDispatchSnf(cleanSnf);
 
-    const f = parseFloat(cleanFat);
-    const s = parseFloat(cleanSnf);
-    if (!isNaN(f) && f > 0 && !isNaN(s) && s > 0) {
-      const autoRate = calculateFatSnfRate(f, s, pricingSettings?.dispatchRate);
-      setAddDispatchRate(String(autoRate));
-    } else {
-      setAddDispatchRate('');
+    if (pricingSettings?.autoCalculate === true) {
+      const f = parseFloat(cleanFat);
+      const s = parseFloat(cleanSnf);
+      if (!isNaN(f) && f > 0 && !isNaN(s) && s > 0) {
+        const autoRate = calculateFatSnfRate(f, s, pricingSettings?.dispatchRate);
+        if (autoRate > 0) {
+          setAddDispatchRate(String(autoRate));
+        }
+      }
     }
   };
 
@@ -357,17 +378,16 @@ export default function DispatchCalendarScreen() {
       setAddDispatchSnf(sStr);
       const fNum = parseFloat(fStr);
       const sNum = parseFloat(sStr);
-      if (!isNaN(fNum) && fNum > 0 && !isNaN(sNum) && sNum > 0) {
+      if (pricingSettings?.autoCalculate === true && !isNaN(fNum) && fNum > 0 && !isNaN(sNum) && sNum > 0) {
         setAddDispatchRate(String(calculateFatSnfRate(fNum, sNum, pricingSettings?.dispatchRate)));
       } else {
-        setAddDispatchRate('');
+        setAddDispatchRate((existing.rate ?? 0) > 0 ? String(existing.rate) : '');
       }
     } else {
       setAddDispatchQtyStr(totalColl > 0 ? String(totalColl) : '');
-      // If the user already typed fat & snf in the modal, keep them and recalculate rate
       const fNum = parseFloat(addDispatchFat);
       const sNum = parseFloat(addDispatchSnf);
-      if (!isNaN(fNum) && fNum > 0 && !isNaN(sNum) && sNum > 0) {
+      if (pricingSettings?.autoCalculate === true && !isNaN(fNum) && fNum > 0 && !isNaN(sNum) && sNum > 0) {
         setAddDispatchRate(String(calculateFatSnfRate(fNum, sNum, pricingSettings?.dispatchRate)));
       }
     }
@@ -436,16 +456,20 @@ export default function DispatchCalendarScreen() {
       return;
     }
 
-    const fat = parseFloat(addDispatchFat);
-    const snf = parseFloat(addDispatchSnf);
+    const fat = parseFloat(addDispatchFat) || 0;
+    const snf = parseFloat(addDispatchSnf) || 0;
+    let finalRate = 0;
 
-    if (isNaN(fat) || fat <= 0 || isNaN(snf) || snf <= 0) {
-      showAlert('Invalid Values', 'Enter valid Fat % and SNF % to calculate plant rate.');
-      return;
+    if (pricingSettings?.autoCalculate === true) {
+      if (isNaN(fat) || fat <= 0 || isNaN(snf) || snf <= 0) {
+        showAlert('Invalid Values', 'Enter valid Fat % and SNF % to calculate plant rate.');
+        return;
+      }
+      finalRate = calculateFatSnfRate(fat, snf, pricingSettings?.dispatchRate);
+    } else {
+      finalRate = parseFloat(addDispatchRate) || 0;
     }
-
-    const finalRate = calculateFatSnfRate(fat, snf, pricingSettings?.dispatchRate);
-    const finalAmount = Math.round(qtyNum * finalRate * 100) / 100;
+    const finalAmount = finalRate > 0 ? Math.round(qtyNum * finalRate * 100) / 100 : 0;
 
     try {
       await addMilkDispatch({
@@ -463,7 +487,9 @@ export default function DispatchCalendarScreen() {
       setShowAddDispatchModal(false);
       showAlert(
         'Dispatch Saved',
-        `${addDispatchSession === 'MORNING' ? 'Morning' : 'Evening'} dispatch saved for ${selectedDateStr} with plant rate ₹${finalRate.toFixed(2)}/L (${formatCurrency(finalAmount)}).`,
+        finalRate > 0
+          ? `${addDispatchSession === 'MORNING' ? 'Morning' : 'Evening'} dispatch saved for ${selectedDateStr} with plant rate ₹${finalRate.toFixed(2)}/L (${formatCurrency(finalAmount)}).`
+          : `${addDispatchSession === 'MORNING' ? 'Morning' : 'Evening'} dispatch saved for ${selectedDateStr} (Plant rate left pending).`,
         'success'
       );
     } catch (err: any) {
@@ -933,27 +959,43 @@ export default function DispatchCalendarScreen() {
                 </View>
               </View>
 
-              {/* Auto Calculated Plant Dispatch Rate Card */}
-              <View style={[styles.autoRateCard, isDark && { backgroundColor: '#064E3B20', borderColor: '#065F46' }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Lock size={13} color={isDark ? '#34D399' : '#166534'} />
-                    <Text style={[styles.autoRateTitle, isDark && { color: '#34D399' }]}>Plant Dispatch Rate</Text>
+              {/* Plant Dispatch Rate: Auto Card or Manual Input */}
+              {pricingSettings?.autoCalculate === true ? (
+                <View style={[styles.autoRateCard, isDark && { backgroundColor: '#064E3B20', borderColor: '#065F46' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Lock size={13} color={isDark ? '#34D399' : '#166534'} />
+                      <Text style={[styles.autoRateTitle, isDark && { color: '#34D399' }]}>Plant Dispatch Rate</Text>
+                    </View>
+                    <View style={[styles.autoRateBadge, isDark && { backgroundColor: '#064E3B50', borderColor: '#059669' }]}>
+                      <Text style={[styles.autoRateBadgeText, isDark && { color: '#34D399' }]}>Auto Calculated</Text>
+                    </View>
                   </View>
-                  <View style={[styles.autoRateBadge, isDark && { backgroundColor: '#064E3B50', borderColor: '#059669' }]}>
-                    <Text style={[styles.autoRateBadgeText, isDark && { color: '#34D399' }]}>Auto Calculated</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
+                    <Text style={[styles.autoRateValue, isDark && { color: '#34D399' }]}>
+                      {modalAutoRate > 0 ? `₹${modalAutoRate.toFixed(2)}` : '—'}
+                      <Text style={[styles.autoRateUnit, isDark && { color: '#6EE7B7' }]}> / Litre</Text>
+                    </Text>
+                    <Text style={[styles.autoRateSub, isDark && { color: '#6EE7B7' }]}>
+                      Base: ₹{pricingSettings?.dispatchRate.baseRate || 50}/L
+                    </Text>
                   </View>
                 </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
-                  <Text style={[styles.autoRateValue, isDark && { color: '#34D399' }]}>
-                    {modalAutoRate > 0 ? `₹${modalAutoRate.toFixed(2)}` : '—'}
-                    <Text style={[styles.autoRateUnit, isDark && { color: '#6EE7B7' }]}> / Litre</Text>
-                  </Text>
-                  <Text style={[styles.autoRateSub, isDark && { color: '#6EE7B7' }]}>
-                    Base: ₹{pricingSettings?.dispatchRate.baseRate || 50}/L
-                  </Text>
+              ) : (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>Plant Dispatch Rate (₹ / Litre) • Optional</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: '800' }]}
+                    keyboardType="numeric"
+                    placeholder="0.00 (Optional)"
+                    placeholderTextColor={colors.textMuted}
+                    value={modalRateStr}
+                    onChangeText={(val) => setModalRateStr(sanitizeDecimalInput(val))}
+                    returnKeyType="done"
+                    onSubmitEditing={handleSaveRate}
+                  />
                 </View>
-              </View>
+              )}
 
               {/* Real-time Calculated Total Amount */}
               <View style={[styles.calcResultBanner, isDark && { backgroundColor: '#0F766E20', borderColor: '#115E59' }]}>
@@ -1130,31 +1172,47 @@ export default function DispatchCalendarScreen() {
                   </View>
                 </View>
 
-                {/* Auto Calculated Rate Card (Read-only) */}
-                <View style={[styles.modalCalcCard, isDark && { backgroundColor: '#064E3B20', borderColor: '#065F46' }]}>
-                  <View style={styles.modalCalcRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Lock size={13} color={isDark ? '#34D399' : '#166534'} />
-                      <Text style={[styles.modalCalcLabel, isDark && { color: '#34D399' }]}>Plant Dispatch Rate</Text>
-                    </View>
-                    <View style={[styles.formulaBadge, isDark && { backgroundColor: '#064E3B50', borderColor: '#059669' }]}>
-                      <Text style={[styles.formulaBadgeText, isDark && { color: '#34D399' }]}>Auto Calculated</Text>
-                    </View>
+                {/* Auto Calculated Rate Card (when auto enabled) OR Optional Manual Rate Input */}
+                {pricingSettings?.autoCalculate !== true ? (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>Plant Dispatch Rate (₹ / Litre) • Optional</Text>
+                    <TextInput
+                      style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: '800' }]}
+                      keyboardType="numeric"
+                      placeholder="0.00 (Optional)"
+                      placeholderTextColor={colors.textMuted}
+                      value={addDispatchRate}
+                      onChangeText={(v) => setAddDispatchRate(sanitizeDecimalInput(v))}
+                      returnKeyType="done"
+                      onSubmitEditing={handleSaveManualDispatch}
+                    />
                   </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
-                    <Text style={[styles.modalCalcRate, isDark && { color: '#34D399' }]}>
-                      {parseFloat(addDispatchRate) > 0 ? `₹${parseFloat(addDispatchRate).toFixed(2)} / L` : '—'}
-                    </Text>
-                    <Text style={[styles.modalCalcAmount, isDark && { color: '#34D399' }]}>
-                      {parseFloat(addDispatchRate) > 0 && (parseFloat(addDispatchQtyStr) || 0) > 0
-                        ? formatCurrency(Math.round((parseFloat(addDispatchQtyStr) || 0) * parseFloat(addDispatchRate) * 100) / 100)
-                        : '₹0'}
+                ) : (
+                  <View style={[styles.modalCalcCard, isDark && { backgroundColor: '#064E3B20', borderColor: '#065F46' }]}>
+                    <View style={styles.modalCalcRow}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Lock size={13} color={isDark ? '#34D399' : '#166534'} />
+                        <Text style={[styles.modalCalcLabel, isDark && { color: '#34D399' }]}>Plant Dispatch Rate</Text>
+                      </View>
+                      <View style={[styles.formulaBadge, isDark && { backgroundColor: '#064E3B50', borderColor: '#059669' }]}>
+                        <Text style={[styles.formulaBadgeText, isDark && { color: '#34D399' }]}>Auto Calculated</Text>
+                      </View>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+                      <Text style={[styles.modalCalcRate, isDark && { color: '#34D399' }]}>
+                        {parseFloat(addDispatchRate) > 0 ? `₹${parseFloat(addDispatchRate).toFixed(2)} / L` : '—'}
+                      </Text>
+                      <Text style={[styles.modalCalcAmount, isDark && { color: '#34D399' }]}>
+                        {parseFloat(addDispatchRate) > 0 && (parseFloat(addDispatchQtyStr) || 0) > 0
+                          ? formatCurrency(Math.round((parseFloat(addDispatchQtyStr) || 0) * parseFloat(addDispatchRate) * 100) / 100)
+                          : '₹0'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.modalCalcSub, isDark && { color: '#6EE7B7' }]}>
+                      Rate calculated strictly from Fat & SNF settings
                     </Text>
                   </View>
-                  <Text style={[styles.modalCalcSub, isDark && { color: '#6EE7B7' }]}>
-                    Rate calculated strictly from Fat & SNF settings
-                  </Text>
-                </View>
+                )}
               </View>
 
               <View style={styles.modalActionsRow}>

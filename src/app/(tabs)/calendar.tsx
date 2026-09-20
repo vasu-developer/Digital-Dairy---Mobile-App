@@ -107,6 +107,7 @@ export default function CalendarRegisterScreen() {
 
   // Input refs for auto-focus navigation
   const quantityInputRef = useRef<TextInput>(null);
+  const rateInputRef = useRef<TextInput>(null);
   const fatInputRef = useRef<TextInput>(null);
   const snfInputRef = useRef<TextInput>(null);
 
@@ -115,6 +116,7 @@ export default function CalendarRegisterScreen() {
   const [showDispatchReceipt, setShowDispatchReceipt] = useState<boolean>(false);
   const [dispatchFatStr, setDispatchFatStr] = useState('');
   const [dispatchSnfStr, setDispatchSnfStr] = useState('');
+  const [dispatchRateStr, setDispatchRateStr] = useState('');
   const dispatchFatRef = useRef<TextInput>(null);
   const dispatchSnfRef = useRef<TextInput>(null);
 
@@ -428,7 +430,7 @@ export default function CalendarRegisterScreen() {
     } else {
       setModalFatStr('');
       setModalSnfStr('');
-      setModalRateStr('0');
+      setModalRateStr(pricingSettings?.autoCalculate === true ? '0' : '');
     }
 
     setShowMilkModal(true);
@@ -443,14 +445,14 @@ export default function CalendarRegisterScreen() {
     setModalFatStr(sanitizedFat);
     setModalSnfStr(sanitizedSnf);
 
-    if (modalCustomer?.customer_type !== 'BUYER') {
+    if (pricingSettings?.autoCalculate === true && modalCustomer?.customer_type !== 'BUYER') {
       const fatNum = parseFloat(sanitizedFat);
       const snfNum = parseFloat(sanitizedSnf);
-      if (fatNum > 0 && snfNum > 0) {
+      if (!isNaN(fatNum) && fatNum > 0 && !isNaN(snfNum) && snfNum > 0) {
         const autoRate = calculateFatSnfRate(fatNum, snfNum, pricingSettings?.customerRate);
-        setModalRateStr(autoRate > 0 ? String(autoRate) : '0');
-      } else {
-        setModalRateStr('0');
+        if (autoRate > 0) {
+          setModalRateStr(String(autoRate));
+        }
       }
     }
   };
@@ -471,6 +473,7 @@ export default function CalendarRegisterScreen() {
     }
 
     const isBuyer = modalCustomer.customer_type === 'BUYER';
+    const isAutoCalculate = pricingSettings?.autoCalculate === true;
     let fatNum = 0;
     let snfNum = 0;
     let rateNum = 0;
@@ -481,7 +484,7 @@ export default function CalendarRegisterScreen() {
         showAlert('Invalid Rate', 'Please enter a valid rate per liter for buyer.');
         return;
       }
-    } else {
+    } else if (isAutoCalculate) {
       fatNum = parseFloat(modalFatStr);
       snfNum = parseFloat(modalSnfStr);
 
@@ -499,6 +502,15 @@ export default function CalendarRegisterScreen() {
         showAlert('Calculation Error', 'Could not calculate milk rate from Fat/SNF.');
         return;
       }
+    } else {
+      // Manual Rate Entry Mode (Default when autoCalculate is disabled)
+      rateNum = parseFloat(modalRateStr);
+      if (!rateNum || rateNum <= 0) {
+        showAlert('Missing Rate', 'Please enter milk rate (₹/L) for this supplier.');
+        return;
+      }
+      fatNum = parseFloat(modalFatStr) || 0;
+      snfNum = parseFloat(modalSnfStr) || 0;
     }
 
     const finalAmount = Math.round(qtyNum * rateNum * 100) / 100;
@@ -580,9 +592,11 @@ export default function CalendarRegisterScreen() {
         if (otherShiftDispatch && otherShiftDispatch.status === 'CLOSED') {
           setDispatchFatStr(otherShiftDispatch.fat > 0 ? String(otherShiftDispatch.fat) : '');
           setDispatchSnfStr(otherShiftDispatch.snf > 0 ? String(otherShiftDispatch.snf) : '');
+          setDispatchRateStr((otherShiftDispatch.rate ?? 0) > 0 ? String(otherShiftDispatch.rate) : '');
         } else {
           setDispatchFatStr('');
           setDispatchSnfStr('');
+          setDispatchRateStr(pricingSettings?.dispatchRate?.baseRate ? String(pricingSettings.dispatchRate.baseRate) : '');
         }
         setShowDispatchModal(true);
         setTimeout(() => {
@@ -597,6 +611,7 @@ export default function CalendarRegisterScreen() {
 
     setDispatchFatStr('');
     setDispatchSnfStr('');
+    setDispatchRateStr(pricingSettings?.dispatchRate?.baseRate ? String(pricingSettings.dispatchRate.baseRate) : '');
     setShowDispatchModal(true);
     setTimeout(() => {
       dispatchFatRef.current?.focus();
@@ -611,38 +626,44 @@ export default function CalendarRegisterScreen() {
   };
 
   const handleConfirmDispatch = () => {
-    const fatVal = parseFloat(dispatchFatStr);
-    const snfVal = parseFloat(dispatchSnfStr);
+    const fatVal = parseFloat(dispatchFatStr) || 0;
+    const snfVal = parseFloat(dispatchSnfStr) || 0;
+    const isAutoCalculate = pricingSettings?.autoCalculate === true;
+    let plantRate = 0;
 
-    if (!fatVal || fatVal <= 0) {
-      showAlert('Missing Fat %', 'Please enter tested Average Fat % for this dispatch.');
-      return;
+    if (isAutoCalculate) {
+      if (!fatVal || fatVal <= 0) {
+        showAlert('Missing Fat %', 'Please enter tested Average Fat % for this dispatch.');
+        return;
+      }
+      if (!snfVal || snfVal <= 0) {
+        showAlert('Missing SNF %', 'Please enter tested Average SNF % for this dispatch.');
+        return;
+      }
+      plantRate = calculateFatSnfRate(fatVal, snfVal, pricingSettings?.dispatchRate);
+    } else {
+      plantRate = parseFloat(dispatchRateStr) || 0;
     }
-    if (!snfVal || snfVal <= 0) {
-      showAlert('Missing SNF %', 'Please enter tested Average SNF % for this dispatch.');
-      return;
-    }
-
-    const calculatedPlantRate = calculateFatSnfRate(fatVal, snfVal, pricingSettings?.dispatchRate);
 
     if (isShiftClosed && currentShiftDispatch) {
-      executeSaveDispatch(fatVal, snfVal, calculatedPlantRate);
+      executeSaveDispatch(fatVal, snfVal, plantRate);
       return;
     }
 
+    const rateSummary = plantRate > 0 ? ` at ₹${plantRate.toFixed(2)}/L` : (fatVal > 0 && snfVal > 0 ? ` (${fatVal}% Fat & ${snfVal}% SNF)` : ' (Rate Pending)');
     showConfirm({
       title: 'Dispatch & Close?',
-      message: `Close ${selectedSession === 'MORNING' ? 'Morning' : 'Evening'} shift and dispatch ${currentSessionLitres.toFixed(1)} L at ${fatVal}% Fat & ${snfVal}% SNF?`,
+      message: `Close ${selectedSession === 'MORNING' ? 'Morning' : 'Evening'} shift and dispatch ${currentSessionLitres.toFixed(1)} L${rateSummary}?`,
       confirmText: 'Dispatch & Close',
       confirmStyle: 'primary',
       onConfirm: () => {
-        executeSaveDispatch(fatVal, snfVal, calculatedPlantRate);
+        executeSaveDispatch(fatVal, snfVal, plantRate);
       },
     });
   };
 
   const executeSaveDispatch = async (fatVal: number, snfVal: number, calculatedPlantRate: number) => {
-    const totalAmount = Math.round(currentSessionLitres * calculatedPlantRate * 100) / 100;
+    const totalAmount = calculatedPlantRate > 0 ? Math.round(currentSessionLitres * calculatedPlantRate * 100) / 100 : 0;
 
     await addMilkDispatch({
       date: selectedDateStr,
@@ -974,9 +995,12 @@ export default function CalendarRegisterScreen() {
         fatStr={modalFatStr}
         snfStr={modalSnfStr}
         rateStr={modalRateStr}
+        setRateStr={setModalRateStr}
+        autoCalculate={pricingSettings?.autoCalculate === true}
         notes={modalNotes}
         setNotes={setModalNotes}
         quantityInputRef={quantityInputRef}
+        rateInputRef={rateInputRef}
         fatInputRef={fatInputRef}
         snfInputRef={snfInputRef}
         onFatSnfChange={handleFatSnfChange}
@@ -995,6 +1019,9 @@ export default function CalendarRegisterScreen() {
         totalBuyerLitres={totalBuyerLitres}
         dispatchFatStr={dispatchFatStr}
         dispatchSnfStr={dispatchSnfStr}
+        dispatchRateStr={dispatchRateStr}
+        setDispatchRateStr={setDispatchRateStr}
+        autoCalculate={pricingSettings?.autoCalculate === true}
         dispatchFatRef={dispatchFatRef}
         dispatchSnfRef={dispatchSnfRef}
         onDispatchFatSnfChange={handleDispatchFatSnfChange}

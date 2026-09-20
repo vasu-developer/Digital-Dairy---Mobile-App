@@ -27,9 +27,12 @@ interface RegisterMilkEntryModalProps {
   fatStr: string;
   snfStr: string;
   rateStr: string;
+  setRateStr?: (val: string) => void;
+  autoCalculate?: boolean;
   notes: string;
   setNotes: (val: string) => void;
   quantityInputRef: RefObject<TextInput | null>;
+  rateInputRef?: RefObject<TextInput | null>;
   fatInputRef: RefObject<TextInput | null>;
   snfInputRef: RefObject<TextInput | null>;
   onFatSnfChange: (fat: string, snf: string) => void;
@@ -48,9 +51,12 @@ export const RegisterMilkEntryModal: React.FC<RegisterMilkEntryModalProps> = ({
   fatStr,
   snfStr,
   rateStr,
+  setRateStr,
+  autoCalculate = false,
   notes,
   setNotes,
   quantityInputRef,
+  rateInputRef,
   fatInputRef,
   snfInputRef,
   onFatSnfChange,
@@ -149,7 +155,7 @@ export const RegisterMilkEntryModal: React.FC<RegisterMilkEntryModalProps> = ({
                 </>
               )}
 
-              {/* Row 1: Quantity (L) | Calculated Rate (₹/L) */}
+              {/* Row 1: Quantity (L) | Rate (₹/L) */}
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
                 {/* Quantity */}
                 <View style={{ flex: 1 }}>
@@ -160,11 +166,13 @@ export const RegisterMilkEntryModal: React.FC<RegisterMilkEntryModalProps> = ({
                       ref={quantityInputRef}
                       style={[styles.modalInputBold, { color: colors.text }]}
                       keyboardType="decimal-pad"
-                      returnKeyType={customer?.customer_type === 'BUYER' ? 'done' : 'next'}
-                      enterKeyHint={customer?.customer_type === 'BUYER' ? 'done' : 'next'}
-                      blurOnSubmit={customer?.customer_type === 'BUYER'}
+                      returnKeyType="next"
+                      enterKeyHint="next"
+                      blurOnSubmit={false}
                       onSubmitEditing={() => {
-                        if (customer?.customer_type === 'BUYER') {
+                        if (!autoCalculate && rateInputRef?.current) {
+                          rateInputRef.current.focus();
+                        } else if (customer?.customer_type === 'BUYER') {
                           onSave();
                         } else {
                           fatInputRef.current?.focus();
@@ -178,18 +186,43 @@ export const RegisterMilkEntryModal: React.FC<RegisterMilkEntryModalProps> = ({
                   </View>
                 </View>
 
-                {/* Calculated Rate (Read-Only from Fat & SNF - Hidden for Milk Buyers) */}
-                {customer?.customer_type !== 'BUYER' && (
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>Calculated Rate</Text>
+                {/* Rate: Either Read-Only (Auto Formula) or Editable (Manual Mode) */}
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>
+                    {autoCalculate && customer?.customer_type !== 'BUYER' ? 'Calculated Rate' : 'Rate (₹/L) *'}
+                  </Text>
+                  {autoCalculate && customer?.customer_type !== 'BUYER' ? (
                     <View style={[styles.modalInputCard, { backgroundColor: isDark ? colors.cardSecondary : '#F8FAFC', borderColor: colors.border }]}>
                       <IndianRupee size={16} color="#059669" style={{ marginRight: 6 }} />
                       <Text style={{ fontSize: 16, fontWeight: '800', color: parseFloat(rateStr) > 0 ? '#059669' : colors.textMuted }}>
                         {parseFloat(rateStr) > 0 ? `₹${parseFloat(rateStr).toFixed(2)}/L` : '0.00'}
                       </Text>
                     </View>
-                  </View>
-                )}
+                  ) : (
+                    <View style={[styles.modalInputCardHighlight, { borderColor: '#10B981', backgroundColor: isDark ? colors.inputBg : '#ECFDF5' }]}>
+                      <IndianRupee size={16} color="#059669" style={{ marginRight: 6 }} />
+                      <TextInput
+                        ref={rateInputRef}
+                        style={[styles.modalInputBold, { color: colors.text }]}
+                        keyboardType="decimal-pad"
+                        returnKeyType={customer?.customer_type === 'BUYER' ? 'done' : 'next'}
+                        enterKeyHint={customer?.customer_type === 'BUYER' ? 'done' : 'next'}
+                        blurOnSubmit={customer?.customer_type === 'BUYER'}
+                        onSubmitEditing={() => {
+                          if (customer?.customer_type === 'BUYER') {
+                            onSave();
+                          } else {
+                            fatInputRef.current?.focus();
+                          }
+                        }}
+                        value={rateStr}
+                        onChangeText={(val) => setRateStr?.(sanitizeDecimalInput(val))}
+                        placeholder="0.00"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                  )}
+                </View>
               </View>
 
               {/* Row 2: Fat (%) | SNF (%) - Hidden for Retail Buyers */}
@@ -197,7 +230,9 @@ export const RegisterMilkEntryModal: React.FC<RegisterMilkEntryModalProps> = ({
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
                   {/* Fat */}
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>Fat (%) *</Text>
+                    <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>
+                      Fat (%) {autoCalculate ? '*' : ''}
+                    </Text>
                     <View style={[styles.modalInputCard, isDark && { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
                       <FlaskConical size={16} color="#D97706" style={{ marginRight: 6 }} />
                       <TextInput
@@ -218,7 +253,9 @@ export const RegisterMilkEntryModal: React.FC<RegisterMilkEntryModalProps> = ({
 
                   {/* SNF */}
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>SNF (%) *</Text>
+                    <Text style={[styles.modalInputLabel, { color: colors.textMedium }]}>
+                      SNF (%) {autoCalculate ? '*' : ''}
+                    </Text>
                     <View style={[styles.modalInputCard, isDark && { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
                       <FlaskConical size={16} color="#059669" style={{ marginRight: 6 }} />
                       <TextInput

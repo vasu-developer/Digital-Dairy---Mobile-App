@@ -10,6 +10,7 @@ export interface RateChartConfig {
 }
 
 export interface DairyPricingSettings {
+  autoCalculate?: boolean; // When true: rate auto-calculates from Fat/SNF formula. When false (default): operator enters rates manually.
   customerRate: RateChartConfig; // Farmer purchase rate configuration
   dispatchRate: RateChartConfig; // Plant dispatch rate configuration
   updatedAt?: string;
@@ -34,6 +35,7 @@ export const DEFAULT_DISPATCH_RATE_CONFIG: RateChartConfig = {
 };
 
 export const DEFAULT_PRICING_SETTINGS: DairyPricingSettings = {
+  autoCalculate: false, // Default is disabled per user preference (manual rates active by default)
   customerRate: DEFAULT_CUSTOMER_RATE_CONFIG,
   dispatchRate: DEFAULT_DISPATCH_RATE_CONFIG,
   updatedAt: new Date().toISOString(),
@@ -50,12 +52,14 @@ export async function loadPricingSettings(): Promise<DairyPricingSettings> {
     const raw = await AsyncStorage.getItem(DAIRY_PRICING_STORAGE_KEY);
     if (!raw) {
       return {
+        autoCalculate: false,
         customerRate: DEFAULT_CUSTOMER_RATE_CONFIG,
         dispatchRate: DEFAULT_DISPATCH_RATE_CONFIG,
       };
     }
     const parsed = JSON.parse(raw);
     return {
+      autoCalculate: parsed.autoCalculate === true, // Default to false unless explicitly set to true
       customerRate: { ...DEFAULT_CUSTOMER_RATE_CONFIG, ...(parsed.customerRate || {}) },
       dispatchRate: { ...DEFAULT_DISPATCH_RATE_CONFIG, ...(parsed.dispatchRate || {}) },
       updatedAt: parsed.updatedAt,
@@ -63,6 +67,7 @@ export async function loadPricingSettings(): Promise<DairyPricingSettings> {
   } catch (err) {
     console.error('Failed to load pricing settings:', err);
     return {
+      autoCalculate: false,
       customerRate: DEFAULT_CUSTOMER_RATE_CONFIG,
       dispatchRate: DEFAULT_DISPATCH_RATE_CONFIG,
     };
@@ -76,6 +81,7 @@ export async function savePricingSettings(settings: DairyPricingSettings): Promi
   try {
     const payload: DairyPricingSettings = {
       ...settings,
+      autoCalculate: settings.autoCalculate === true,
       updatedAt: new Date().toISOString(),
     };
     await AsyncStorage.setItem(DAIRY_PRICING_STORAGE_KEY, JSON.stringify(payload));

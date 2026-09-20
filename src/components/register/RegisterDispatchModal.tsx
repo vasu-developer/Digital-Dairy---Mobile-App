@@ -13,6 +13,7 @@ import {
 import { X, Truck, Droplet, FlaskConical, AlertCircle, CheckCircle } from 'lucide-react-native';
 import { useAppTheme } from '@/context/ThemeContext';
 import { ThemeColors } from '@/constants/theme';
+import { sanitizeDecimalInput } from '@/utils/calculator';
 
 interface RegisterDispatchModalProps {
   visible: boolean;
@@ -24,6 +25,9 @@ interface RegisterDispatchModalProps {
   totalBuyerLitres: number;
   dispatchFatStr: string;
   dispatchSnfStr: string;
+  dispatchRateStr?: string;
+  setDispatchRateStr?: (val: string) => void;
+  autoCalculate?: boolean;
   dispatchFatRef: RefObject<TextInput | null>;
   dispatchSnfRef: RefObject<TextInput | null>;
   onDispatchFatSnfChange: (fat: string, snf: string) => void;
@@ -41,6 +45,9 @@ export const RegisterDispatchModal: React.FC<RegisterDispatchModalProps> = ({
   totalBuyerLitres,
   dispatchFatStr,
   dispatchSnfStr,
+  dispatchRateStr,
+  setDispatchRateStr,
+  autoCalculate = false,
   dispatchFatRef,
   dispatchSnfRef,
   onDispatchFatSnfChange,
@@ -157,6 +164,24 @@ export const RegisterDispatchModal: React.FC<RegisterDispatchModalProps> = ({
                   </View>
                 </View>
               </View>
+
+              {/* Plant Dispatch Rate Input (When Auto Rate is Disabled - Optional) */}
+              {!autoCalculate && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.modalInputLabelSub, { color: colors.textMedium }]}>Plant Dispatch Rate (₹ / Litre) • Optional</Text>
+                  <View style={[styles.modalInputCard, isDark && { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: '#059669', marginRight: 6 }}>₹</Text>
+                    <TextInput
+                      style={[styles.modalInputBold, { color: colors.text }]}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00 (Optional)"
+                      placeholderTextColor={colors.textMuted}
+                      value={dispatchRateStr}
+                      onChangeText={(val) => setDispatchRateStr?.(sanitizeDecimalInput(val))}
+                    />
+                  </View>
+                </View>
+              )}
 
               {/* Warning note */}
               <View style={styles.dispatchWarningBox}>
