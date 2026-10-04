@@ -1,3 +1,5 @@
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { recoverPendingSync } from '@/sync/storage';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Customer, MilkCollection, Transaction, MonthlySettlement, MilkDispatch, DailyProfitReport, MonthlyProfitReport } from '@/types';
 import { INITIAL_CUSTOMERS, INITIAL_COLLECTIONS, INITIAL_TRANSACTIONS, getDatabase, safeAlterColumn } from './database';
@@ -63,6 +65,8 @@ interface RepositoryContextType {
 const RepositoryContext = createContext<RepositoryContextType | null>(null);
 
 export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [ready, setReady] = useState(false);
+  const [startupError, setStartupError] = useState('');
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS || []);
   const [collections, setCollections] = useState<MilkCollection[]>(INITIAL_COLLECTIONS || []);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS || []);
@@ -99,6 +103,8 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const refreshData = async () => {
+    try { await recoverPendingSync(); }
+    catch (error) { setReady(false); setStartupError('Unable to finish restoring synced data. Free some device storage and retry.'); throw error; }
     // 0. Always load pricing settings
     try {
       const loadedPricing = await loadPricingSettings();
@@ -160,9 +166,12 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  useEffect(() => {
-    refreshData();
-  }, []);
+  const initialize = async () => {
+    setStartupError('');
+    try { await refreshData(); setReady(true); }
+    catch { setStartupError('Unable to finish restoring synced data. Free some device storage and retry.'); }
+  };
+  useEffect(() => { void initialize(); }, []);
 
   const safeCustomers = customers || [];
   const safeCollections = collections || [];
@@ -177,7 +186,7 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       customer_type: custData.customer_type || 'SELLER',
       default_sale_rate: custData.default_sale_rate || 60,
       opening_balance: custData.opening_balance || 0,
-      id: 'c_' + Date.now(),
+      id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12),
       created_at: custData.created_at || new Date().toISOString().split('T')[0],
     };
 
@@ -322,7 +331,7 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } else {
       finalCollection = {
         ...collData,
-        id: 'm_' + Date.now(),
+        id: 'm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12),
         customer_id: targetCustId,
         customer_name: customerName,
         village: villageName,
@@ -347,7 +356,7 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     );
 
     const finalTx: Transaction = {
-      id: existingTx?.id || ('t_' + Date.now()),
+      id: existingTx?.id || ('t_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12)),
       customer_id: finalCollection.customer_id,
       customer_name: finalCollection.customer_name,
       date: finalCollection.date,
@@ -506,7 +515,7 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const customer = safeCustomers.find((c) => c && String(c.id) === String(txData.customer_id));
     const newTx: Transaction = {
       ...txData,
-      id: 't_' + Date.now(),
+      id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12),
       customer_name: customer?.name || txData.customer_name,
       created_at: new Date().toISOString(),
     };
@@ -863,7 +872,7 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       : previousBalance + milkValueTotal + customerRepayments - deductions - actualPaymentsMade;
 
     const settlement: MonthlySettlement = {
-      id: 's_' + Date.now(),
+      id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12),
       customer_id: customerId,
       month_year: monthYear,
       previous_balance: previousBalance,
@@ -881,7 +890,7 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const addMilkDispatch = async (dispatchData: Omit<MilkDispatch, 'id' | 'dispatched_at'>): Promise<MilkDispatch> => {
     const newDispatch: MilkDispatch = {
       ...dispatchData,
-      id: 'd_' + Date.now(),
+      id: 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12),
       dispatched_at: new Date().toISOString(),
     };
 
@@ -1068,6 +1077,10 @@ export const RepositoryProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       pendingDispatchRateCount,
     };
   };
+
+  if (!ready) return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+    {startupError ? <><Text>{startupError}</Text><TouchableOpacity onPress={() => void initialize()} style={{ padding: 20 }}><Text>Retry</Text></TouchableOpacity></> : <ActivityIndicator size="large" color="#059669" />}
+  </View>;
 
   return (
     <RepositoryContext.Provider

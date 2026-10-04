@@ -413,6 +413,15 @@ export default function MoreScreen() {
         {/* Section 1: Offline SQLite Backup & Restore */}
         <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>DATA BACKUP & RESTORE</Text>
 
+        <TouchableOpacity style={[styles.menuItem, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => router.push('/cloud-sync' as any)} activeOpacity={0.8}>
+          <Upload size={20} color="#059669" style={{ marginRight: 12 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuTitle, { color: colors.text }]}>Sync to DB</Text>
+            <Text style={[styles.menuSub, { color: colors.textMuted }]}>Save to your dairy account & sync across devices</Text>
+          </View>
+          <ChevronRight size={20} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {/* Backup Status Card */}
         <View style={[styles.backupStatusCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -481,8 +490,8 @@ export default function MoreScreen() {
         <View style={[styles.menuItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <ShieldCheck size={20} color="#16A34A" style={{ marginRight: 12 }} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.menuTitle, { color: colors.text }]}>Phase 2 Ready</Text>
-            <Text style={[styles.menuSub, { color: colors.textMuted }]}>Prepared for cloud backend sync layer</Text>
+            <Text style={[styles.menuTitle, { color: colors.text }]}>Cloud Sync Available</Text>
+            <Text style={[styles.menuSub, { color: colors.textMuted }]}>Optional account backup and multi-device sync</Text>
           </View>
         </View>
 
